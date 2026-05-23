@@ -18,8 +18,12 @@
     "dist:deb": "cross-env ELECTRON_DIST=1 vite build && electron-builder --linux deb --publish never",
     "dist:arch": "cross-env ELECTRON_DIST=1 vite build && electron-builder --linux pacman --publish never",
     "dist:appimage": "cross-env ELECTRON_DIST=1 vite build && electron-builder --linux AppImage --publish never",
-    "dist:win": "cross-env ELECTRON_DIST=1 vite build && electron-builder --win --publish never",
-    "dist:mac": "cross-env ELECTRON_DIST=1 vite build && electron-builder --mac --universal --publish never",
+    "dist:win": "cross-env ELECTRON_DIST=1 vite build && electron-builder --win zip --publish never",
+    "dist:win:dir": "cross-env ELECTRON_DIST=1 vite build && electron-builder --win dir --publish never",
+    "dist:win:installer": "cross-env ELECTRON_DIST=1 vite build && electron-builder --win nsis --publish never",
+    "dist:mac": "cross-env ELECTRON_DIST=1 vite build && electron-builder --mac zip --x64 --publish never",
+    "dist:mac:dir": "cross-env ELECTRON_DIST=1 vite build && electron-builder --mac dir --x64 --publish never",
+    "dist:mac:dmg": "cross-env ELECTRON_DIST=1 vite build && electron-builder --mac dmg --universal --publish never",
     "dist:mas": "cross-env ELECTRON_DIST=1 vite build && electron-builder --mac mas --universal --publish never"
   },
   "dependencies": {
