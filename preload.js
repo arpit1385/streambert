@@ -46,6 +46,8 @@ contextBridge.exposeInMainWorld("electron", {
       seconds,
       subtitlePaths,
     }),
+  extractVideoUrl: (webContentsId) =>
+    ipcRenderer.invoke("extract-video-url", webContentsId),
   pruneSubtitlePaths: (downloadId) =>
     ipcRenderer.invoke("prune-subtitle-paths", { downloadId }),
 

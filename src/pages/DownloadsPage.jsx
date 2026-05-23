@@ -572,15 +572,20 @@ export default function DownloadsPage({
                   key={dl.id}
                   dl={dl}
                   fileExists={dl.isLocalOnly ? true : fileExistsCache[dl.id]}
-                  onWatch={(subtitlePaths) =>
-                    subtitlePaths?.length > 0
-                      ? window.electron.openPathAtTime(
-                          dl.filePath,
-                          0,
-                          subtitlePaths,
-                        )
-                      : window.electron.openPath(dl.filePath)
-                  }
+                  onWatch={async (subtitlePaths) => {
+                    if (subtitlePaths?.length > 0) {
+                      const result = await window.electron.openPathAtTime(
+                        dl.filePath,
+                        0,
+                        subtitlePaths,
+                      );
+                      if (!result?.ok) {
+                        console.warn("Failed to open player:", result?.error);
+                      }
+                      return;
+                    }
+                    window.electron.openPath(dl.filePath);
+                  }}
                   onHistory={onHistory}
                   onShowFolder={() =>
                     window.electron?.showInFolder(dl.filePath)
@@ -900,7 +905,7 @@ const LocalFileCard = memo(function LocalFileCard({
     setShowPopover(false);
   }, [storageKey]);
 
-  const handleWatch = useCallback(() => {
+  const handleWatch = useCallback(async () => {
     if (!dl.filePath) return;
     // Update watch history when playing from downloads
     if (onHistory && dl.tmdbId && dl.mediaType) {
@@ -915,7 +920,14 @@ const LocalFileCard = memo(function LocalFileCard({
       });
     }
     if (savedSecs > 0 && window.electron?.openPathAtTime) {
-      window.electron.openPathAtTime(dl.filePath, savedSecs, dl.subtitlePaths);
+      const result = await window.electron.openPathAtTime(
+        dl.filePath,
+        savedSecs,
+        dl.subtitlePaths,
+      );
+      if (!result?.ok) {
+        console.warn("Failed to open player:", result?.error);
+      }
     } else {
       onWatch(dl.subtitlePaths);
     }

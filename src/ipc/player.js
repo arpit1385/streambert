@@ -14,9 +14,14 @@ function register(getMainWindow, { writeSecretMigration }) {
   // ── Open file at specific timestamp in mpv / VLC ─────────────────────────
   ipcMain.handle(
     "open-path-at-time",
-    (_, { filePath, seconds, subtitlePaths }) => {
+    async (_, { filePath, seconds, subtitlePaths }) => {
+      if (!filePath) return { ok: false, error: "No path or URL provided" };
+
       const sec = Math.floor(seconds || 0);
       const platform = process.platform;
+      const isRemoteUrl = (value) => /^https?:\/\//i.test(value || "");
+      const isUsableSubtitle = (value) =>
+        isRemoteUrl(value) || (value && fs.existsSync(value));
 
       const resolveBin = (bin) => {
         if (path.isAbsolute(bin)) return fs.existsSync(bin) ? bin : null;
@@ -61,34 +66,124 @@ function register(getMainWindow, { writeSecretMigration }) {
 
       const subFilePaths = Array.isArray(subtitlePaths)
         ? subtitlePaths
-            .map((sp) => (typeof sp === "string" ? sp : sp?.path))
-            .filter((p) => p && fs.existsSync(p))
+            .map((sp) => {
+              if (typeof sp === "string") return sp;
+              // Remote intercepted subtitles carry .url; downloaded subtitles use .path.
+              return sp?.url || sp?.path;
+            })
+            .filter(isUsableSubtitle)
         : [];
       const mpvSubArgs = subFilePaths.map((p) => `--sub-file=${p}`);
       const vlcSubArgs =
         subFilePaths.length > 0 ? [`--sub-file=${subFilePaths[0]}`] : [];
 
-      if (sec > 0) {
+      // Try mpv/VLC first for URLs even when sec=0, because shell.openExternal
+      // usually opens a browser instead of a video player.
+      if (isRemoteUrl(filePath)) {
+        const mpvArgs = [
+          ...(sec > 0 ? [`--start=${sec}`] : []),
+          ...mpvSubArgs,
+          filePath,
+        ];
+        const vlcArgs = [
+          ...(sec > 0 ? [`--start-time=${sec}`] : []),
+          ...vlcSubArgs,
+          filePath,
+        ];
         for (const mpv of mpvPaths) {
-          if (tryLaunch(mpv, [`--start=${sec}`, ...mpvSubArgs, filePath]))
-            return;
+          if (tryLaunch(mpv, mpvArgs)) return { ok: true, player: "mpv" };
         }
         for (const vlc of vlcPaths) {
-          if (tryLaunch(vlc, [`--start-time=${sec}`, ...vlcSubArgs, filePath]))
-            return;
+          if (tryLaunch(vlc, vlcArgs)) return { ok: true, player: "vlc" };
         }
-      } else if (mpvSubArgs.length > 0) {
-        for (const mpv of mpvPaths) {
-          if (tryLaunch(mpv, [...mpvSubArgs, filePath])) return;
-        }
-        for (const vlc of vlcPaths) {
-          if (tryLaunch(vlc, [...vlcSubArgs, filePath])) return;
+
+        try {
+          await shell.openExternal(filePath);
+          return { ok: true, player: "shell" };
+        } catch (e) {
+          return { ok: false, error: e.message };
         }
       }
 
-      shell.openPath(filePath);
+      // Local file handling
+      if (sec > 0) {
+        for (const mpv of mpvPaths) {
+          if (tryLaunch(mpv, [`--start=${sec}`, ...mpvSubArgs, filePath])) {
+            return { ok: true, player: "mpv" };
+          }
+        }
+        for (const vlc of vlcPaths) {
+          if (tryLaunch(vlc, [`--start-time=${sec}`, ...vlcSubArgs, filePath])) {
+            return { ok: true, player: "vlc" };
+          }
+        }
+      } else if (mpvSubArgs.length > 0) {
+        for (const mpv of mpvPaths) {
+          if (tryLaunch(mpv, [...mpvSubArgs, filePath])) {
+            return { ok: true, player: "mpv" };
+          }
+        }
+        for (const vlc of vlcPaths) {
+          if (tryLaunch(vlc, [...vlcSubArgs, filePath])) {
+            return { ok: true, player: "vlc" };
+          }
+        }
+      }
+
+      try {
+        const error = await shell.openPath(filePath);
+        return error
+          ? { ok: false, error }
+          : { ok: true, player: "shell" };
+      } catch (e) {
+        return { ok: false, error: e.message };
+      }
     },
   );
+
+  // ── Extract video URL and timestamp from webview ──────────────────────────
+  ipcMain.handle("extract-video-url", async (_, webContentsId) => {
+    try {
+      const { webContents } = require("electron");
+      const wc = webContents.fromId(webContentsId);
+      if (!wc || wc.isDestroyed()) return null;
+
+      // Recursively collect all frames
+      const allFrames = [];
+      const collect = (frame) => {
+        if (wc.isDestroyed()) throw new Error("WebContents destroyed");
+        allFrames.push(frame);
+        for (const child of frame.frames || []) collect(child);
+      };
+      collect(wc.mainFrame);
+
+      const JS = `
+        (() => {
+          const v = document.querySelector('video');
+          if (!v) return null;
+          const source = v.querySelector('source');
+          const src = v.currentSrc || v.src || source?.src || source?.currentSrc;
+          if (!src || src.startsWith('blob:') || src.startsWith('data:')) return null;
+          return {
+            url: src,
+            currentTime: v.currentTime || 0,
+            duration: v.duration || 0,
+          };
+        })()
+      `;
+
+      for (const frame of allFrames) {
+        try {
+          if (wc.isDestroyed()) return null;
+          const result = await frame.executeJavaScript(JS);
+          if (result && result.url) return result;
+        } catch {}
+      }
+      return null;
+    } catch {
+      return null;
+    }
+  });
 
   // ── Window controls (custom Windows titlebar) ─────────────────────────────
   ipcMain.handle("window-minimize", () => {

@@ -44,6 +44,7 @@ import {
   SourceIcon,
   ShieldBlockIcon,
   PopOutIcon,
+  MpvIcon,
 } from "../components/Icons";
 import DownloadModal from "../components/DownloadModal";
 import TrailerModal from "../components/TrailerModal";
@@ -1783,6 +1784,73 @@ export default function TVPage({
                     style={pipOpen ? { color: "var(--red)" } : undefined}
                   >
                     <PopOutIcon />
+                  </button>
+                  {/* Play in MPV button */}
+                  <button
+                    className="player-overlay-btn"
+                    onClick={async () => {
+                      try {
+                        let url = m3u8Url;
+                        let timestamp = currentProgressKey
+                          ? storage.get("dlTime_" + currentProgressKey) || 0
+                          : 0;
+                        const webContentsId =
+                          pipWebContentsIdRef.current ??
+                          webviewRef.current?.getWebContentsId?.();
+
+                        if (webContentsId) {
+                          const extracted =
+                            await window.electron?.extractVideoUrl?.(
+                              webContentsId,
+                            );
+                          if (
+                            extracted?.currentTime != null &&
+                            extracted.currentTime >= 0
+                          ) {
+                            timestamp = extracted.currentTime;
+                          }
+                          if (!url && extracted?.url) url = extracted.url;
+                        }
+
+                        if (!url && isAsync) {
+                          const directUrl = resolvedPlayerUrl || "";
+                          if (/\.(m3u8|mp4|webm|mkv)(\?|$)/i.test(directUrl)) {
+                            url = directUrl;
+                          }
+                        }
+
+                        if (!url) {
+                          console.warn("No playable URL found");
+                          return;
+                        }
+
+                        const result = await window.electron?.openPathAtTime?.(
+                          url,
+                          Math.floor(timestamp),
+                          interceptedSubs,
+                        );
+
+                        if (result?.ok) {
+                          if (pipOpen) await window.electron?.closePipWindow?.();
+                          pipUrlRef.current = null;
+                          pipWebContentsIdRef.current = null;
+                          setPipOpen(false);
+                          setPlaying(false);
+                          window.electron?.playerStopped?.();
+                        } else {
+                          console.warn("Failed to launch player:", result?.error);
+                        }
+                      } catch (e) {
+                        console.error("Play in MPV error:", e);
+                      }
+                    }}
+                    title="Play in MPV"
+                    disabled={
+                      (!m3u8Url && webviewLoading) ||
+                      (isAsync && !resolvedPlayerUrl)
+                    }
+                  >
+                    <MpvIcon />
                   </button>
                 </div>
                 {showSourceMenu && menuPos && (
